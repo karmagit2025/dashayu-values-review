@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>价值观考核 · 开始填写</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  body { padding-bottom: 30px; background: #eef1f7; }
+  .join-wrap { max-width: 430px; margin: 0 auto; padding: 0 16px; }
+  .join-hero { padding: 34px 0 18px; text-align: center; color: #1f3864; }
+  .join-hero .company { font-size: 13px; letter-spacing: 1px; color: #6b7a99; }
+  .join-hero h1 { font-size: 24px; margin: 8px 0 4px; letter-spacing: 1px; }
+  .join-hero .period { display: inline-block; margin-top: 8px; padding: 2px 12px; border-radius: 999px;
+                        background: #dfe6f3; color: #2c4a7c; font-size: 13px; }
+  .join-card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 20px;
+               box-shadow: 0 6px 20px rgba(20,35,70,.06); }
+  .field { margin-bottom: 15px; }
+  .field label { display: block; font-size: 13px; color: #4a5364; margin-bottom: 6px; font-weight: 600; }
+  .field input, .field select {
+    width: 100%; padding: 12px 13px; border: 1px solid var(--line); border-radius: 10px;
+    font: inherit; font-size: 16px; background: #fff; color: #1f2430; outline: none;
+    appearance: none;
+  }
+  .field select { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8'><path d='M1 1l5 5 5-5' fill='none' stroke='%2378839c' stroke-width='1.6'/></svg>");
+                  background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; }
+  .field input:focus, .field select:focus { border-color: var(--navy); box-shadow: 0 0 0 3px rgba(31,56,100,.08); }
+  .field .tip { font-size: 12px; color: #9aa2b1; margin-top: 5px; }
+  .join-card .btn { width: 100%; padding: 14px; font-size: 16px; margin-top: 4px; }
+  .join-note { text-align: center; font-size: 12px; color: #98a0b0; margin: 16px 0 0; line-height: 1.7; }
+  .closed { text-align: center; padding: 50px 10px; }
+  .closed h2 { color: #1f3864; }
+  .errline { color: #c0392b; font-size: 13px; margin: -4px 0 10px; display: none; }
+  .errline.show { display: block; }
+</style>
+</head>
+<body>
+<div id="root"><div class="center">加载中…</div></div>
+<div class="toast" id="toast"></div>
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let OPT = null;
+
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function deptOptions() {
+  return OPT.departments.map(d =>
+    `<option value="${d.id}">${'\u3000'.repeat(Math.max(0, d.level - 1))}${esc(d.name)}</option>`).join('');
+}
+
+function render() {
+  const root = $('#root');
+  if (!OPT.open) {
+    root.innerHTML = `<div class="join-wrap"><div class="join-hero">
+        <div class="company">泉州市大鲨鱼机械科技有限公司</div>
+        <h1>价值观考核</h1><div class="period">${esc(OPT.period)}</div></div>
+      <div class="join-card closed"><h2>本期填写已关闭</h2>
+      <p style="color:#6b7280;font-size:13.5px">如有疑问，请联系行政人事部。</p></div></div>`;
+    return;
+  }
+  root.innerHTML = `
+  <div class="join-wrap">
+    <div class="join-hero">
+      <div class="company">泉州市大鲨鱼机械科技有限公司</div>
+      <h1>价值观考核</h1>
+      <div class="period">${esc(OPT.period)}</div>
+    </div>
+    <div class="join-card">
+      <div class="field">
+        <label>手机号</label>
+        <input id="phone" type="tel" inputmode="numeric" maxlength="11" placeholder="11 位手机号">
+        <div class="tip">用于识别本人，不会公开</div>
+      </div>
+      <div class="field">
+        <label>姓名</label>
+        <input id="name" maxlength="20" placeholder="你的姓名">
+      </div>
+      <div class="field">
+        <label>所在部门</label>
+        <select id="dept"><option value="">请选择部门</option>${deptOptions()}</select>
+      </div>
+      <div class="errline" id="err"></div>
+      <button class="btn primary" id="start">开始填写</button>
+    </div>
+    <p class="join-note">填完自评后，你的主管会收到同一份表单<br>继续填写他评，结果用于年度考核</p>
+  </div>`;
+
+  $('#start').addEventListener('click', start);
+  $('#phone').addEventListener('keydown', e => { if (e.key === 'Enter') start(); });
+  $('#name').addEventListener('keydown', e => { if (e.key === 'Enter') start(); });
+}
+
+function showErr(msg) {
+  const el = $('#err'); el.textContent = msg; el.classList.add('show');
+}
+
+async function start() {
+  const phone = $('#phone').value.trim();
+  const name = $('#name').value.trim();
+  const dept = $('#dept').value;
+  if (!/^1\d{10}$/.test(phone)) return showErr('请填写 11 位手机号');
+  if (name.length < 2) return showErr('请填写姓名');
+  if (!dept) return showErr('请选择所在部门');
+  const btn = $('#start');
+  btn.disabled = true; btn.textContent = '进入中…';
+  try {
+    const r = await fetch('/api/join', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, name, dept_id: +dept })
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || '进不去，请重试');
+    if (j.resume && j.status !== 'draft') {
+      toast('已找到你的记录');
+      setTimeout(() => { location.href = `/f/${j.token}`; }, 400);
+    } else {
+      location.href = `/f/${j.token}`;
+    }
+  } catch (e) {
+    btn.disabled = false; btn.textContent = '开始填写';
+    showErr(e.message);
+  }
+}
+
+(async () => {
+  try {
+    const r = await fetch('/api/join/options');
+    OPT = await r.json();
+    render();
+  } catch (e) {
+    $('#root').innerHTML = '<div class="center">网络错误，请刷新重试</div>';
+  }
+})();
+</script>
+</body>
+</html>

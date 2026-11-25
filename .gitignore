@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 数据（含个人信息，不入库）
+data/
+*.db
+*.db-wal
+*.db-shm
+*.db.bak
+
+# 测试产物
+shots/*.png
+.pytest_cache/
+.coverage

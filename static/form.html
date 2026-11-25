@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>价值观考核 · 在线填写</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="root">
+  <div class="center">加载中…</div>
+</div>
+<div class="toast" id="toast"></div>
+<div class="mask" id="mask">
+  <div class="dialog">
+    <h3 id="dlgTitle">确认提交？</h3>
+    <p id="dlgText"></p>
+    <div class="btns">
+      <button class="btn ghost" id="dlgCancel">再看看</button>
+      <button class="btn primary" id="dlgOk">确认提交</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const TOKEN = location.pathname.split('/').pop();
+const CN = ['一','二','三','四','五','六'];
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+let S = null;          // 服务端数据
+let A = [];            // 答案
+let openNote = new Set();  // 员工页展开的补充说明
+let readonly = false;
+
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+function dialog(title, text, okText) {
+  return new Promise((resolve) => {
+    $('#dlgTitle').textContent = title;
+    $('#dlgText').textContent = text;
+    $('#dlgOk').textContent = okText || '确认提交';
+    $('#mask').classList.add('show');
+    const close = (v) => {
+      $('#mask').classList.remove('show');
+      $('#dlgOk').onclick = null;
+      $('#dlgCancel').onclick = null;
+      resolve(v);
+    };
+    $('#dlgOk').onclick = () => close(true);
+    $('#dlgCancel').onclick = () => close(false);
+  });
+}
+
+function blank() {
+  return S.values.map(() => ({ self: null, self_note: '', mgr: null, mgr_note: '', final: null }));
+}
+
+function loadDraft() {
+  try {
+    const raw = localStorage.getItem(`rf-${TOKEN}-${S.role}`);
+    if (raw) {
+      const d = JSON.parse(raw);
+      if (Array.isArray(d) && d.length === A.length) {
+        // 只在服务端没数据时恢复，避免覆盖已提交内容
+        const empty = A.every(x => !x.self && !x.mgr && !x.self_note && !x.mgr_note);
+        if (empty) { A = d; return true; }
+      }
+    }
+  } catch (e) {}
+  return false;
+}
+
+function saveDraft() {
+  if (readonly) return;
+  try { localStorage.setItem(`rf-${TOKEN}-${S.role}`, JSON.stringify(A)); } catch (e) {}
+}
+
+function doneCells(i) {
+  const a = A[i];
+  if (S.role === 'emp') {
+    return a.self && (a.self < 4 || (a.self_note || '').trim().length >= 8);
+  }
+  return a.mgr && (a.mgr < 4 || (a.mgr_note || '').trim().length >= 8) && a.final;
+}
+
+function renderProgress() {
+  const n = A.filter((_, i) => doneCells(i)).length;
+  $('.bar span').style.width = (n / A.length * 100) + '%';
+  $('.progress .txt').textContent = `已完成 ${n}/${A.length}`;
+}
+
+function rowHtml(i, li, text, level, selected) {
+  return `<div class="row ${selected ? 'on' : ''}" data-i="${i}" data-lv="${level}">
+    <span class="lv">${level}</span><span class="txt">${esc(text)}</span></div>`;
+}
+
+function cardHtml(i) {
+  const v = S.values[i];
+  const a = A[i];
+  const isEmp = S.role === 'emp';
+  const cur = isEmp ? a.self : a.mgr;
+  const noteKey = isEmp ? 'self_note' : 'mgr_note';
+  const note = a[noteKey] || '';
+  const need = cur >= 4;
+  const showNote = need || note.trim() || openNote.has(i) || (!isEmp);
+
+  const rows = v.items.map((t, k) =>
+    rowHtml(i, k, t, k + 1, cur === k + 1)).join('');
+
+  let selfBox = '';
+  if (!isEmp) {
+    const sc = a.self;
+    selfBox = `<div class="selfbox">
+      <div><span class="k">员工自评：</span>${sc ? `<span class="score">${sc} 分</span>` : '<span class="empty">未填写</span>'}</div>
+      <div class="note-text">${a.self_note ? esc(a.self_note) : '<span class="empty">（未写例证）</span>'}</div>
+    </div>`;
+  }
+
+  const noteBlock = showNote ? `
+    <div class="note">
+      <label>${isEmp ? '自评例证' : '主管评例证'}${need ? '<span class="req">（4-5 分必填）</span>' : '（选填）'}</label>
+      ${readonly ? `<div style="font-size:13.5px;white-space:pre-wrap;color:#333a47">${esc(note) || '<span class="empty" style="color:#a8afbd">未填写</span>'}</div>`
+      : `<textarea data-i="${i}" maxlength="300" placeholder="写一个具体的时间、事情和结果，例如：11月客户设备故障，2 小时内到场处理，客户书面表扬">${esc(note)}</textarea>
+         <div class="count">${note.length}/300</div>`}
+    </div>` : `
+    <div class="note"><button class="linkbtn" data-open="${i}">+ 补充说明（选填）</button></div>`;
+
+  const finalBlock = (!isEmp && !readonly) ? `
+    <div class="final">
+      <span class="k">综合得分</span>
+      <div class="seg" data-i="${i}">
+        ${[1,2,3,4,5].map(n => `<button data-i="${i}" data-f="${n}" class="${a.final === n ? 'on' : ''}">${n}</button>`).join('')}
+      </div>
+      <span class="k" style="margin-left:auto" id="diff-${i}"></span>
+    </div>` : (a.final ? `<div class="final"><span class="k">综合得分</span><b style="color:#1f3864;font-size:15px">${a.final}</b></div>` : '');
+
+  return `<section class="card" data-card="${i}">
+    <div class="card-head"><h2>${CN[i]}、${esc(v.name)}</h2><span class="hint">${need ? '4-5 分需附例证' : '点选所达级别'}</span></div>
+    ${selfBox}
+    <div class="rows">${rows}</div>
+    ${noteBlock}
+    ${finalBlock}
+    <div class="err" data-err="${i}"></div>
+  </section>`;
+}
+
+function shell() {
+  const roleText = S.role === 'emp' ? '员工自评' : '主管评价';
+  const statusText = { draft: '待自评', submitted: '待主管评', done: '已完成' }[S.status] || '';
+  return `
+  <div class="topbar"><div class="wrap">
+    <div class="company">泉州市大鲨鱼机械科技有限公司</div>
+    <h1>价值观考核表 · ${roleText}</h1>
+    <div class="meta">
+      <span>姓名 <b>${esc(S.emp)}</b></span>
+      <span>部门 <b>${esc(S.dept || '—')}</b></span>
+      <span>主管 <b>${esc(S.mgr)}</b></span>
+      <span>周期 <b>${esc(S.period)}</b></span>
+      <span class="badge">${statusText}</span>
+    </div>
+  </div></div>
+  <div class="progress"><div class="wrap">
+    <div class="bar"><span></span></div><div class="txt">已完成 0/6</div>
+  </div></div>
+  <div class="wrap" id="cards">
+    ${S.values.map((_, i) => cardHtml(i)).join('')}
+  </div>
+  <div class="actions"><div class="wrap">
+    <span class="tip">${readonly ? '本页已提交，内容不可修改' : (S.role === 'emp' ? '提交后由主管接着填写，提交前请确认例证写清楚' : '提交后 HR 可导出汇总，如需修改请联系 HR')}</span>
+    ${readonly ? '' : `<button class="btn primary" id="submitBtn">${S.role === 'emp' ? '提交自评' : '提交评价'}</button>`}
+  </div></div>`;
+}
+
+function doneView(lines, sub) {
+  return `<div class="topbar"><div class="wrap">
+    <div class="company">泉州市大鲨鱼机械科技有限公司</div>
+    <h1>价值观考核表</h1>
+  </div></div>
+  <div class="wrap"><div class="center done">
+    <div class="done-icon">✓</div>
+    <h2>已提交</h2>
+    <p>${esc(S.emp)} · ${esc(S.period)}</p>
+    ${sub ? `<p style="color:#6b7280">${esc(sub)}</p>` : ''}
+    <div class="summary">${lines}</div>
+  </div></div>`;
+}
+
+function summaryLines() {
+  const isEmp = S.role === 'emp';
+  return S.values.map((v, i) => {
+    const a = A[i];
+    const name = esc(v.name.split('：')[0]);
+    if (isEmp) {
+      return `<div><span>${name}</span><span>自评 <b>${a.self || '—'}</b> 分</span></div>`;
+    }
+    const self = a.self ? `${a.self} 分` : '—';
+    const mgr = a.mgr ? `${a.mgr} 分` : '—';
+    const fin = a.final ? `${a.final} 分` : (a.mgr ? `${a.mgr} 分` : '—');
+    return `<div><span>${name}</span><span>自评 <b>${self}</b> · 主管 <b>${mgr}</b> · 综合 <b>${fin}</b></span></div>`;
+  }).join('');
+}
+
+function bind() {
+  document.querySelectorAll('.row').forEach(el => {
+    if (readonly) return;
+    el.addEventListener('click', () => {
+      const i = +el.dataset.i, lv = +el.dataset.lv;
+      if (S.role === 'emp') { A[i].self = lv; } else { A[i].mgr = lv; if (!A[i].final) A[i].final = lv; }
+      refreshCard(i);
+      renderProgress();
+      saveDraft();
+    });
+  });
+
+  document.querySelectorAll('.linkbtn[data-open]').forEach(el => {
+    el.addEventListener('click', () => { openNote.add(+el.dataset.open); refreshCard(+el.dataset.open); });
+  });
+
+  document.querySelectorAll('textarea[data-i]').forEach(el => {
+    el.addEventListener('input', () => {
+      const i = +el.dataset.i;
+      A[i][S.role === 'emp' ? 'self_note' : 'mgr_note'] = el.value;
+      const c = el.parentElement.querySelector('.count');
+      if (c) c.textContent = `${el.value.length}/300`;
+      renderProgress();
+      saveDraft();
+    });
+  });
+
+  document.querySelectorAll('.seg button').forEach(el => {
+    el.addEventListener('click', () => {
+      const i = +el.dataset.i;
+      A[i].final = +el.dataset.f;
+      document.querySelectorAll(`.seg[data-i="${i}"] button`).forEach(b => b.classList.toggle('on', +b.dataset.f === A[i].final));
+      renderProgress();
+      saveDraft();
+    });
+  });
+
+  const btn = $('#submitBtn');
+  if (btn) btn.addEventListener('click', submit);
+}
+
+function refreshCard(i) {
+  const old = document.querySelector(`[data-card="${i}"]`);
+  if (!old) return;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = cardHtml(i);
+  const fresh = tmp.firstElementChild;
+  old.replaceWith(fresh);
+  // 重新绑定这一张卡里的控件
+  bindCard(fresh, i);
+  renderDiff(i);
+}
+
+function bindCard(card, i) {
+  card.querySelectorAll('.row').forEach(el => {
+    if (readonly) return;
+    el.addEventListener('click', () => {
+      const lv = +el.dataset.lv;
+      if (S.role === 'emp') A[i].self = lv; else { A[i].mgr = lv; if (!A[i].final) A[i].final = lv; }
+      refreshCard(i); renderProgress(); saveDraft();
+    });
+  });
+  card.querySelectorAll('.linkbtn[data-open]').forEach(el =>
+    el.addEventListener('click', () => { openNote.add(i); refreshCard(i); }));
+  const ta = card.querySelector('textarea[data-i]');
+  if (ta) ta.addEventListener('input', () => {
+    A[i][S.role === 'emp' ? 'self_note' : 'mgr_note'] = ta.value;
+    const c = ta.parentElement.querySelector('.count');
+    if (c) c.textContent = `${ta.value.length}/300`;
+    renderProgress(); saveDraft();
+  });
+  card.querySelectorAll('.seg button').forEach(el =>
+    el.addEventListener('click', () => {
+      A[i].final = +el.dataset.f;
+      card.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', +b.dataset.f === A[i].final));
+      renderProgress(); saveDraft();
+    }));
+  renderDiff(i);
+}
+
+function renderDiff(i) {
+  const el = document.getElementById(`diff-${i}`);
+  if (!el) return;
+  const a = A[i];
+  if (!a.mgr || !a.self) { el.textContent = ''; return; }
+  if (a.mgr !== a.self) {
+    el.textContent = '与自评不同，建议在例证里说明';
+    el.style.color = '#b45309';
+  } else { el.textContent = ''; }
+}
+
+function validate() {
+  let first = -1;
+  S.values.forEach((v, i) => {
+    const a = A[i];
+    let msg = '';
+    if (S.role === 'emp') {
+      if (!a.self) msg = '请选择本项所达到的级别';
+      else if (a.self >= 4 && (a.self_note || '').trim().length < 8) msg = `${a.self} 分需要写例证（至少 8 个字）`;
+    } else {
+      if (!a.mgr) msg = '请选择主管评级别';
+      else if (a.mgr >= 4 && (a.mgr_note || '').trim().length < 8) msg = `${a.mgr} 分需要写例证（至少 8 个字）`;
+    }
+    const card = document.querySelector(`[data-card="${i}"]`);
+    const err = card.querySelector(`[data-err="${i}"]`);
+    if (msg) {
+      card.classList.add('has-err');
+      err.textContent = msg;
+      if (first < 0) first = i;
+    } else {
+      card.classList.remove('has-err');
+      err.textContent = '';
+    }
+  });
+  if (first >= 0) {
+    document.querySelector(`[data-card="${first}"]`).scrollIntoView({ behavior: 'smooth', block: 'center' });
+    toast('还有未完成的项目');
+    return false;
+  }
+  return true;
+}
+
+async function submit() {
+  if (!validate()) return;
+  const ok = await dialog('确认提交？',
+    S.role === 'emp' ? '提交后自评将锁定，由主管接着评价。' : '提交后本页锁定，HR 可以导出汇总。');
+  if (!ok) return;
+  const btn = $('#submitBtn');
+  btn.disabled = true; btn.textContent = '提交中…';
+  try {
+    const r = await fetch(`/api/form/${TOKEN}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answers: A, submit: true })
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || '提交失败');
+    localStorage.removeItem(`rf-${TOKEN}-${S.role}`);
+    S.status = j.status;
+    document.getElementById('root').innerHTML = doneView(
+      summaryLines(),
+      S.role === 'emp' ? '自评已锁定，接下来由主管评价。' : '主管评价已提交，HR 可以导出结果了。');
+    window.scrollTo(0, 0);
+  } catch (e) {
+    btn.disabled = false; btn.textContent = S.role === 'emp' ? '提交自评' : '提交评价';
+    toast(e.message);
+  }
+}
+
+async function main() {
+  try {
+    const r = await fetch(`/api/form/${TOKEN}`);
+    const j = await r.json();
+    if (!r.ok) {
+      document.getElementById('root').innerHTML =
+        `<div class="center"><h2 style="color:#c0392b">${esc(j.detail || '链接无效')}</h2><p>请把截图发给 HR 处理。</p></div>`;
+      return;
+    }
+    S = j;
+    A = (j.answers && j.answers.length === j.values.length) ? j.answers : blank();
+    A.forEach(a => { a.self_note = a.self_note || ''; a.mgr_note = a.mgr_note || ''; });
+    readonly = !((S.role === 'emp' && S.status === 'draft') || (S.role === 'mgr' && S.status === 'submitted'));
+    if (!readonly) loadDraft();
+
+    if (readonly) {
+      document.getElementById('root').innerHTML = doneView(summaryLines(), '本页已提交，内容不可修改。如需调整请联系 HR。');
+      return;
+    }
+    document.getElementById('root').innerHTML = shell();
+    bind();
+    renderProgress();
+    A.forEach((_, i) => renderDiff(i));
+  } catch (e) {
+    document.getElementById('root').innerHTML = `<div class="center">网络错误，请刷新重试</div>`;
+  }
+}
+
+main();
+</script>
+</body>
+</html>

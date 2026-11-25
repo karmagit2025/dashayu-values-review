@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>价值观考核 · 管理后台</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .wrap { max-width: 1120px; }
+  .tabs { display:flex; gap:6px; margin:16px 0 6px; }
+  .tabs button { border:1px solid var(--line); background:#fff; color:#4a5364; padding:8px 16px;
+                 border-radius:9px; font:inherit; font-size:13.5px; cursor:pointer; }
+  .tabs button.on { background:var(--navy); border-color:var(--navy); color:#fff; font-weight:600; }
+  .panel { background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px; margin:12px 0; }
+  .panel h2 { margin:0 0 12px; font-size:15px; color:var(--navy); display:flex; align-items:center; gap:10px; }
+  .panel h2 .sub { font-size:12px; color:#9aa2b1; font-weight:400; }
+  .row-flex { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+  .fld { flex:1; min-width:150px; }
+  .fld label { display:block; font-size:12.5px; color:var(--muted); margin-bottom:5px; }
+  .fld input, .fld select, .fld textarea {
+    width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:8px; font:inherit; font-size:14px; background:#fff;
+  }
+  .fld input:focus, .fld select:focus, .fld textarea:focus { outline:none; border-color:var(--navy); box-shadow:0 0 0 3px rgba(31,56,100,.08); }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  th, td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th { font-size:12.5px; color:var(--muted); font-weight:600; background:#f7f9fc; }
+  tr:hover td { background:#fbfcfe; }
+  .st { display:inline-block; padding:1px 9px; border-radius:999px; font-size:12px; white-space:nowrap; }
+  .st.draft { background:#fff4e5; color:#b45309; }
+  .st.submitted { background:#e8f0ff; color:#1f3864; }
+  .st.done { background:#e6f5ee; color:#1f8a5b; }
+  .ops { display:flex; gap:6px; flex-wrap:wrap; }
+  .ops button, .ops a { font-size:12px; padding:4px 9px; border-radius:7px; border:1px solid var(--line);
+                        background:#fff; cursor:pointer; color:#33405a; text-decoration:none; }
+  .ops button:hover, .ops a:hover { border-color:var(--navy); color:var(--navy); }
+  .empty { text-align:center; color:#9aa2b1; padding:26px 0; font-size:13.5px; }
+  .login { max-width:360px; margin:80px auto; background:#fff; border:1px solid var(--line); border-radius:14px; padding:26px; }
+  .login h2 { margin:0 0 6px; font-size:18px; }
+  .login p { margin:0 0 18px; color:var(--muted); font-size:13px; }
+  .login input { width:100%; padding:11px 12px; border:1px solid var(--line); border-radius:9px; font:inherit; margin-bottom:12px; }
+  .login button { width:100%; }
+  .toast2 { position:fixed; left:50%; bottom:30px; transform:translateX(-50%); background:rgba(24,32,48,.94); color:#fff;
+            padding:10px 16px; border-radius:10px; font-size:13.5px; opacity:0; pointer-events:none; transition:.2s; z-index:99; }
+  .toast2.show { opacity:1; }
+  .dept-name { padding-left: var(--pad, 0); }
+  .dept-name .leaf { color:#9aa2b1; font-size:12px; margin-left:6px; }
+  .badge-open { background:#e6f5ee; color:#1f8a5b; font-size:12px; padding:1px 9px; border-radius:999px; }
+  .badge-closed { background:#fdecea; color:#c0392b; font-size:12px; padding:1px 9px; border-radius:999px; }
+  .entry-box { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .entry-box code { flex:1; min-width:220px; background:#f5f7fb; border:1px dashed var(--line); border-radius:8px;
+                    padding:10px 12px; font-size:13px; color:#2c4a7c; word-break:break-all; }
+  .hint { font-size:12.5px; color:#9aa2b1; margin-top:8px; }
+  @media (max-width: 720px) { table { font-size:12.5px; } th,td{padding:8px 6px;} .tabs button{padding:7px 12px;} }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div class="toast2" id="toast"></div>
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let TAB = 'records';
+let ORG = null, RECORDS = [], FILTER = '';
+
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200);
+}
+async function api(url, opts = {}) {
+  const r = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || '请求失败');
+  return j;
+}
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); toast('已复制'); }
+  catch (e) {
+    const ta = document.createElement('textarea'); ta.value = text;
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast('已复制');
+  }
+}
+
+/* ---------------- 登录 ---------------- */
+function loginView() {
+  return `<div class="login">
+    <h2>价值观考核 · 管理后台</h2>
+    <p>先设好部门和主管，员工自己进来填。</p>
+    <input id="pwd" type="password" placeholder="管理密码" autofocus>
+    <button class="btn primary" id="loginBtn">进入</button>
+  </div>`;
+}
+
+/* ---------------- 主体 ---------------- */
+function shell() {
+  const base = location.origin;
+  return `
+  <div class="topbar"><div class="wrap">
+    <div class="company">泉州市大鲨鱼机械科技有限公司</div>
+    <h1>价值观考核 · 管理后台</h1>
+    <div class="meta"><span>员工自助填写 → 主管按部门认领 → 导出 Excel</span></div>
+  </div></div>
+  <div class="wrap">
+    <div class="tabs">
+      <button data-tab="records" class="${TAB==='records'?'on':''}">考核记录</button>
+      <button data-tab="org" class="${TAB==='org'?'on':''}">部门与主管</button>
+      <button data-tab="settings" class="${TAB==='settings'?'on':''}">设置</button>
+    </div>
+    <div id="tabBody"></div>
+  </div>`;
+}
+
+/* ---------------- 记录 ---------------- */
+function recordsView() {
+  const base = location.origin + '/';
+  const open = ORG.entry_open;
+  const st = { draft: '待自评', submitted: '待主管评', done: '已完成' };
+  const deptSelect = (r) => `<select data-dept="${r.id}" style="padding:3px 5px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:12px;max-width:158px">
+      ${ORG.departments.map(d => `<option value="${d.id}" ${d.id === r.dept_id ? 'selected' : ''}>${esc(d.path)}</option>`).join('')}
+    </select>`;
+  const list = RECORDS.filter(r => !FILTER ||
+    (r.emp + r.dept + r.mgr).toLowerCase().includes(FILTER.toLowerCase()));
+  return `
+  <div class="panel">
+    <h2>员工入口 <span class="sub">把这个链接发到群里，员工自己填手机号、姓名、部门</span></h2>
+    <div class="entry-box">
+      <code>${esc(base)}</code>
+      <button class="ops btn ghost sm" data-copy="${esc(base)}" style="padding:9px 14px">复制链接</button>
+      <span class="${open ? 'badge-open' : 'badge-closed'}">${open ? '开放填写' : '已关闭'}</span>
+    </div>
+    <div class="hint">员工提交后，系统按「部门 → 主管」自动分给他，主管打开自己的链接就能看到名单。</div>
+  </div>
+
+  <div class="panel">
+    <h2>考核记录 <span class="sub">共 ${RECORDS.length} 人</span></h2>
+    <div class="row-flex" style="margin-bottom:12px">
+      <div class="fld" style="max-width:240px"><input id="filter" placeholder="搜姓名 / 部门 / 主管" value="${esc(FILTER)}"></div>
+      <button class="btn ghost sm" id="exportAll" style="padding:9px 14px">导出全部（Excel）</button>
+      <button class="btn ghost sm" id="exportLinks" style="padding:9px 14px">导出链接表（CSV）</button>
+    </div>
+    ${list.length ? `<table>
+      <thead><tr><th>姓名</th><th>部门</th><th>主管</th><th>状态</th><th>时间</th><th style="width:300px">操作</th></tr></thead>
+      <tbody>${list.map(r => `
+        <tr data-id="${r.id}">
+          <td><b>${esc(r.emp)}</b><div style="color:#9aa2b1;font-size:12px">${esc(r.phone || '')}</div></td>
+          <td>${deptSelect(r)}</td>
+          <td style="white-space:nowrap">${r.mgr ? esc(r.mgr) : '<span style="color:#c0392b">未指定</span>'}</td>
+          <td><span class="st ${r.status}">${st[r.status] || r.status}</span></td>
+          <td style="color:#6b7280;font-size:12px;line-height:1.55;white-space:nowrap">${esc((r.emp_at || r.created_at || '').slice(5, 16))}<br>${esc((r.mgr_at || '').slice(5, 16) || '—')}</td>
+          <td><div class="ops">
+            <button data-export="${r.id}">导出</button>
+            <a href="${esc(r.emp_link)}" target="_blank">看自评</a>
+            <button data-reset="${r.id}">重置</button>
+            <button data-del="${r.id}">删除</button>
+          </div></td>
+        </tr>`).join('')}</tbody></table>`
+      : '<div class="empty">还没有人填写</div>'}
+  </div>`;
+}
+
+/* ---------------- 组织 ---------------- */
+function orgView() {
+  const depts = ORG.departments;
+  const mgrs = ORG.managers;
+  const byId = {}, byParent = {};
+  depts.forEach(d => { byId[d.id] = d; (byParent[d.parent_id || 0] = byParent[d.parent_id || 0] || []).push(d); });
+  const subtree = id => (byId[id].staff || 0) + ((byParent[id] || []).reduce((n, c) => n + subtree(c.id), 0));
+  const opts = (cur) => `<option value="">未指定（继承上级）</option>` +
+    mgrs.map(m => `<option value="${m.id}" ${m.id === cur ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
+  return `
+  <div class="panel">
+    <h2>新增部门</h2>
+    <div class="row-flex">
+      <div class="fld"><label>部门名称</label><input id="deptName" placeholder="如：装配车间"></div>
+      <div class="fld"><label>上级部门</label>
+        <select id="deptParent"><option value="">作为一级部门</option>
+        ${depts.map(d => `<option value="${d.id}">${esc(d.path)}</option>`).join('')}</select>
+      </div>
+      <button class="btn primary sm" id="addDept" style="padding:10px 18px">添加</button>
+    </div>
+    <details style="margin-top:12px">
+      <summary style="cursor:pointer;font-size:13px;color:#2c4a7c">批量导入（每行一条，用 / 表示层级）</summary>
+      <div class="fld" style="margin-top:10px">
+        <textarea id="bulkDept" rows="5" placeholder="生产中心/装配车间&#10;生产中心/机加工车间&#10;质检部"></textarea>
+      </div>
+      <button class="btn ghost sm" id="bulkDeptBtn" style="padding:9px 14px">导入</button>
+    </details>
+  </div>
+
+  <div class="panel">
+    <h2>部门树与主管 <span class="sub">子部门留空就自动继承上级主管</span></h2>
+    ${depts.length ? `<table>
+      <thead><tr><th style="width:46%">部门</th><th>主管</th><th>人数</th><th></th></tr></thead>
+      <tbody>${depts.map(d => `
+        <tr data-dept="${d.id}">
+          <td><span class="dept-name" style="--pad:${(d.level-1)*18}px">${esc(d.name)}</span>
+              <span class="leaf">${d.level === 1 ? '一级' : (d.level === 2 ? '二级' : '三级')}</span></td>
+          <td><select data-mgr="${d.id}" style="padding:6px 8px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px">
+              ${opts(d.manager_id)}
+          </select></td>
+          <td>${subtree(d.id)}${subtree(d.id) !== (d.staff || 0) ? ` <span class="leaf">含下级</span>` : ''}</td>
+          <td><div class="ops"><button data-deldept="${d.id}">删除</button></div></td>
+        </tr>`).join('')}</tbody></table>` : '<div class="empty">还没有部门，先加一个</div>'}
+  </div>
+
+  <div class="panel">
+    <h2>主管 <span class="sub">每个人一条专属链接，打开就是「待我评价」名单</span></h2>
+    <div class="row-flex" style="margin-bottom:12px">
+      <div class="fld"><label>主管姓名</label><input id="mgrName" placeholder="如：陈主管"></div>
+      <div class="fld"><label>手机号（选填）</label><input id="mgrPhone" placeholder="13900000000"></div>
+      <button class="btn primary sm" id="addMgr" style="padding:10px 18px">添加主管</button>
+    </div>
+    ${mgrs.length ? `<table>
+      <thead><tr><th>姓名</th><th>手机号</th><th>专属链接</th><th style="width:170px"></th></tr></thead>
+      <tbody>${mgrs.map(m => `
+        <tr><td><b>${esc(m.name)}</b></td><td>${esc(m.phone || '—')}</td>
+        <td style="font-size:12px;color:#6b7280;word-break:break-all">${esc(m.link)}</td>
+        <td><div class="ops"><button data-copy="${esc(m.link)}">复制链接</button>
+          <a href="${esc(m.link)}" target="_blank">打开</a>
+          <button data-delmgr="${m.id}">删除</button></div></td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty">还没有主管</div>'}
+  </div>`;
+}
+
+/* ---------------- 设置 ---------------- */
+function settingsView() {
+  return `
+  <div class="panel">
+    <h2>考核周期</h2>
+    <div class="row-flex">
+      <div class="fld" style="max-width:260px"><label>当前周期（员工进来看到的就是这个）</label>
+        <input id="period" value="${esc(ORG.period)}"></div>
+      <button class="btn primary sm" id="savePeriod" style="padding:10px 18px">保存</button>
+    </div>
+    <div class="hint">换周期后，同一手机号会在新周期重新建档，不会覆盖上期数据。</div>
+  </div>
+  <div class="panel">
+    <h2>填写开关</h2>
+    <div class="row-flex">
+      <button class="btn ${ORG.entry_open ? 'ghost' : 'primary'} sm" id="toggleOpen" style="padding:10px 18px">
+        ${ORG.entry_open ? '关闭填写入口' : '重新开放填写'}</button>
+      <span class="${ORG.entry_open ? 'badge-open' : 'badge-closed'}">${ORG.entry_open ? '当前开放' : '当前关闭'}</span>
+    </div>
+    <div class="hint">关闭后员工打不开入口；主管仍可继续评价已提交的人。</div>
+  </div>
+  <div class="panel">
+    <h2>安全</h2>
+    <div class="hint" style="margin-top:0">管理密码通过环境变量 <code>REVIEW_ADMIN_PASSWORD</code> 设置（默认 admin123，上线前改掉）。
+    <br>链接都带随机 token，员工/主管不需要账号；换人只需在部门里改主管。</div>
+  </div>`;
+}
+
+/* ---------------- 渲染与事件 ---------------- */
+function renderBody() {
+  const el = $('#tabBody');
+  if (!el) return;
+  if (!ORG) { el.innerHTML = '<div class="panel"><div class="empty">加载中…</div></div>'; return; }
+  if (TAB === 'records') el.innerHTML = recordsView();
+  else if (TAB === 'org') el.innerHTML = orgView();
+  else el.innerHTML = settingsView();
+  bindBody();
+}
+
+function bindBody() {
+  $$('.tabs button').forEach(b => b.onclick = () => { TAB = b.dataset.tab; syncTabs(); renderBody(); });
+  $$('[data-copy]').forEach(b => b.onclick = () => copy(b.dataset.copy));
+
+  if (TAB === 'records') {
+    const f = $('#filter');
+    if (f) f.oninput = () => { FILTER = f.value; const pos = f.selectionStart; renderBody();
+      const nf = $('#filter'); if (nf) { nf.focus(); nf.setSelectionRange(pos, pos); } };
+    $('#exportAll').onclick = () => { location.href = '/api/export'; };
+    $('#exportLinks').onclick = () => { location.href = '/api/links.csv'; };
+    $$('[data-export]').forEach(b => b.onclick = () => { location.href = `/api/reviews/${b.dataset.export}/export`; });
+    $$('select[data-dept]').forEach(s => s.onchange = async () => {
+      try {
+        await api(`/api/reviews/${s.dataset.dept}/dept`, { method: 'POST', body: JSON.stringify({ dept_id: +s.value }) });
+        await loadAll(); toast('部门已改，主管跟着变了');
+      } catch (e) { toast(e.message); }
+    });
+    $$('[data-reset]').forEach(b => b.onclick = async () => {
+      if (!confirm('重置后该员工可以重填自评，主管已填内容会保留。确定？')) return;
+      try { await api(`/api/reviews/${b.dataset.reset}/reset`, { method: 'POST' }); await loadAll(); toast('已重置'); }
+      catch (e) { toast(e.message); }
+    });
+    $$('[data-del]').forEach(b => b.onclick = async () => {
+      if (!confirm('删除这条记录？不可恢复。')) return;
+      try { await api(`/api/reviews/${b.dataset.del}/delete`, { method: 'POST' }); await loadAll(); toast('已删除'); }
+      catch (e) { toast(e.message); }
+    });
+  }
+
+  if (TAB === 'org') {
+    $('#addDept').onclick = async () => {
+      const name = $('#deptName').value.trim();
+      if (!name) return toast('填个部门名');
+      try {
+        await api('/api/departments', { method: 'POST', body: JSON.stringify({ name, parent_id: +$('#deptParent').value || null }) });
+        await loadAll(); toast('已添加');
+      } catch (e) { toast(e.message); }
+    };
+    $('#bulkDeptBtn').onclick = async () => {
+      const text = $('#bulkDept').value.trim();
+      if (!text) return toast('先粘贴部门');
+      try {
+        const r = await api('/api/departments/bulk', { method: 'POST', body: JSON.stringify({ text }) });
+        await loadAll(); toast(`新增 ${r.created} 个部门`);
+      } catch (e) { toast(e.message); }
+    };
+    $$('select[data-mgr]').forEach(s => s.onchange = async () => {
+      try {
+        await api(`/api/departments/${s.dataset.mgr}`, { method: 'POST', body: JSON.stringify({ manager_id: +s.value || null }) });
+        await loadAll(); toast('主管已更新');
+      } catch (e) { toast(e.message); }
+    });
+    $$('[data-deldept]').forEach(b => b.onclick = async () => {
+      if (!confirm('删除这个部门？')) return;
+      try { await api(`/api/departments/${b.dataset.deldept}/delete`, { method: 'POST' }); await loadAll(); toast('已删除'); }
+      catch (e) { toast(e.message); }
+    });
+    $('#addMgr').onclick = async () => {
+      const name = $('#mgrName').value.trim();
+      try {
+        await api('/api/managers', { method: 'POST', body: JSON.stringify({ name, phone: $('#mgrPhone').value.trim() }) });
+        await loadAll(); toast('已添加主管');
+      } catch (e) { toast(e.message); }
+    };
+    $$('[data-delmgr]').forEach(b => b.onclick = async () => {
+      if (!confirm('删除这个主管？')) return;
+      try { await api(`/api/managers/${b.dataset.delmgr}/delete`, { method: 'POST' }); await loadAll(); toast('已删除'); }
+      catch (e) { toast(e.message); }
+    });
+  }
+
+  if (TAB === 'settings') {
+    $('#savePeriod').onclick = async () => {
+      try { await api('/api/settings', { method: 'POST', body: JSON.stringify({ period: $('#period').value.trim() }) });
+        await loadAll(); toast('已保存'); } catch (e) { toast(e.message); }
+    };
+    $('#toggleOpen').onclick = async () => {
+      try { await api('/api/settings', { method: 'POST', body: JSON.stringify({ entry_open: !ORG.entry_open }) });
+        await loadAll(); toast('已切换'); } catch (e) { toast(e.message); }
+    };
+  }
+}
+
+function syncTabs() {
+  $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === TAB));
+}
+
+async function loadAll() {
+  const [org, rec] = await Promise.all([api('/api/org'), api('/api/reviews')]);
+  ORG = org; RECORDS = rec.items;
+  renderBody();
+  syncTabs();
+}
+
+async function boot() {
+  const root = $('#root');
+  let me = { authed: false };
+  try { me = await api('/api/me'); } catch (e) {}
+  if (!me.authed) {
+    root.innerHTML = loginView();
+    $('#loginBtn').onclick = async () => {
+      try { await api('/api/login', { method: 'POST', body: JSON.stringify({ password: $('#pwd').value }) }); boot(); }
+      catch (e) { toast(e.message); }
+    };
+    $('#pwd').onkeydown = e => { if (e.key === 'Enter') $('#loginBtn').click(); };
+    return;
+  }
+  root.innerHTML = shell();
+  try {
+    await loadAll();
+  } catch (e) {
+    toast(e.message);
+    const tb = $('#tabBody');
+    if (tb) tb.innerHTML = `<div class="panel"><div class="empty">加载失败：${esc(e.message)}</div></div>`;
+  }
+}
+boot();
+</script>
+</body>
+</html>
